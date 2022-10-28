@@ -12,8 +12,9 @@ use rust_bert::{
 };
 use serde::{Deserialize, Serialize};
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct GenTextRequest {
+    pub max_length: i64,
     pub prefix: String,
     pub texts: Vec<String>,
 }
@@ -49,21 +50,25 @@ pub async fn gen_text(gen_text_input: web::Json<GenTextRequest>) -> web::Json<Ge
         merges_resource,
         num_beams: 5,
         no_repeat_ngram_size: 2,
-        max_length: 100,
+        max_length: gen_text_input.max_length,
         ..Default::default()
     };
 
     info!("[{}] Building model.", request_id);
 
     let blocking_task = 
-        tokio::task::spawn_blocking(|| TextGenerationModel::new(generate_config));
+        tokio::task::spawn_blocking(move|| {
+            let model = TextGenerationModel::new(generate_config).unwrap();
 
-    let model = blocking_task.await.unwrap().unwrap();
+            info!("[{}] Generating results.", request_id);
     
-    info!("[{}] Generating results.", request_id);
-    
-    let prefix = gen_text_input.prefix.as_str();
-    let output = model.generate(&gen_text_input.texts, Some(prefix));
+            let prefix = gen_text_input.prefix.as_str();
+            let output = model.generate(&gen_text_input.clone().texts, Some(prefix));
+
+            output
+        });
+
+    let output = blocking_task.await.unwrap();
     
     let mut results = Vec::new();
     
